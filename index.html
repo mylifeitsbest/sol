@@ -163,10 +163,11 @@
   .op-panel { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); }
   .op-panel.in { border-color: rgba(var(--good-rgb), .55); }
   .op-panel.out { border-color: rgba(var(--bad-rgb), .55); }
-  .op-panel .row { display: grid; gap: 6px; margin-top: 10px; }
+  .op-panel .row { display: grid; gap: 6px; margin-top: 10px; align-content: start; }
+  .op-panel .row label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-height: 18px; }
   .op-panel .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
   .op-panel label { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
-  .op-panel input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+  .op-panel input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
   .op-panel input.mono { font-weight: 700; }
   .op-panel .actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
   .ops { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -203,6 +204,7 @@
   /* Cards */
   .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); min-width: 0; }
   .grid2 { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .col { display: grid; gap: 18px; min-width: 0; }
 
   /* Calendar */
   .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
@@ -297,6 +299,17 @@
   .session .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   @media (prefers-reduced-motion: reduce) { .due-banner { animation: none; } }
   @media (max-width: 760px) { .countdown { font-size: 44px; } }
+
+  /* PnL card modal */
+  .modal { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-bg { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); }
+  .modal-box { position: relative; width: min(680px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 14px; box-shadow: var(--shadow); }
+  .modal-box canvas { display: block; width: 100%; height: auto; border-radius: 12px; background: #000; }
+  .modal-box .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .modal-box .hint { margin: 8px 0 0; }
+  .unit-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .unit-toggle .btn { border: 0; border-radius: 0; padding: 9px 12px; color: var(--ink-2); }
+  .unit-toggle .btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); }
 
   .toast {
     position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
@@ -447,9 +460,8 @@
         <div class="hint" id="op-day-info" style="margin:6px 0 0" hidden></div>
         <div class="row2">
           <div class="row">
-            <label for="op-amount">Сумма, SOL</label>
+            <label for="op-amount"><span>Сумма, SOL</span><span class="hint" id="op-usd" style="margin:0">≈ $0</span></label>
             <input id="op-amount" class="mono" type="number" inputmode="decimal" min="0" step="0.001" placeholder="0.00">
-            <span class="hint" id="op-usd" style="margin:0">≈ $0</span>
           </div>
           <div class="row">
             <label for="op-date">Дата</label>
@@ -509,13 +521,21 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="chart-head">
-        <h2>Накопление, SOL</h2>
-        <span class="hint" id="chart-sub" style="margin:0"></span>
+    <div class="col">
+      <div class="card">
+        <div class="chart-head">
+          <h2>Пополнения и выводы</h2>
+          <span class="hint" id="ops-sub" style="margin:0"></span>
+        </div>
+        <div class="chart-wrap" id="ops-chart"></div>
       </div>
-      <div class="chart-wrap" id="chart"></div>
-      <div class="chart-foot hint" id="chart-foot"></div>
+      <div class="card">
+        <div class="chart-head">
+          <h2>Накопление, SOL</h2>
+          <span class="hint" id="chart-sub" style="margin:0"></span>
+        </div>
+        <div class="chart-wrap" id="chart"></div>
+      </div>
     </div>
   </section>
 
@@ -555,6 +575,24 @@
       <input id="sync-file" type="file" accept="application/json,.json" hidden>
     </div>
   </section>
+</div>
+
+<div class="modal" id="pnl-modal" hidden>
+  <div class="modal-bg" id="pnl-bg"></div>
+  <div class="modal-box" role="dialog" aria-label="Карточка дня">
+    <canvas id="pnl-canvas" width="1200" height="800"></canvas>
+    <div class="actions">
+      <span class="unit-toggle" role="group" aria-label="Единица на карточке">
+        <button type="button" class="btn" id="unit-usd" aria-pressed="true">USD</button>
+        <button type="button" class="btn" id="unit-sol" aria-pressed="false">SOL</button>
+      </span>
+      <button type="button" class="btn primary" id="pnl-download">Скачать PNG</button>
+      <button type="button" class="btn" id="pnl-copy">Скопировать</button>
+      <button type="button" class="btn" id="pnl-op">Добавить операцию</button>
+      <button type="button" class="btn" id="pnl-close">Закрыть</button>
+    </div>
+    <p class="hint" id="pnl-status"></p>
+  </div>
 </div>
 
 <script>
@@ -599,7 +637,7 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const w = $('#chart').clientWidth;
-      if (Math.abs(w - lastChartWidth) > 40) renderChart(entries());
+      if (Math.abs(w - lastChartWidth) > 40) { renderChart(entries()); renderOpsChart(entries()); }
     }, 150);
   });
 
@@ -929,6 +967,7 @@
     renderTiles(st);
     renderCalendar(list);
     renderChart(list);
+    renderOpsChart(list);
     renderJournal(list);
     $('#acc-demo').setAttribute('aria-selected', String(state.account === 'demo'));
     $('#acc-real').setAttribute('aria-selected', String(state.account === 'real'));
@@ -1105,6 +1144,78 @@
       tip.style.top = Math.max(0, (y(p.y) / H) * rect.height - 44) + 'px';
     };
     const leave = () => { xh.setAttribute('visibility', 'hidden'); hp.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+    hit.addEventListener('pointermove', move);
+    hit.addEventListener('pointerdown', move);
+    hit.addEventListener('pointerleave', leave);
+  }
+
+  function renderOpsChart(list) {
+    const el = $('#ops-chart');
+    const seq = [];
+    list.forEach((d) => {
+      if (d.ops && d.ops.length) d.ops.forEach((o) => { if (Math.abs(o.a) > 0.0005) seq.push({ date: d.date, a: o.a, note: o.note || '' }); });
+      else if (Math.abs(d.result) > 0.0005) seq.push({ date: d.date, a: d.result, note: d.note || '' });
+    });
+    const MAX = 60;
+    const bars = seq.slice(-MAX);
+    const plus = bars.filter((b) => b.a > 0), minus = bars.filter((b) => b.a < 0);
+    $('#ops-sub').textContent = bars.length ? `${plus.length} ${plural(plus.length, 'пополнение', 'пополнения', 'пополнений')} · ${minus.length} ${plural(minus.length, 'вывод', 'вывода', 'выводов')}${seq.length > MAX ? ` · последние ${MAX}` : ''}` : '';
+    if (!bars.length) { el.innerHTML = '<p class="empty">Здесь появятся столбики: зелёные — пополнения, красные — выводы из баланса.</p>'; return; }
+    const W = Math.max(320, Math.round(el.clientWidth || 640));
+    const H = 200, L = 44, R = 12, T = 14, B = 26;
+    let yMin = Math.min(0, ...bars.map((b) => b.a)), yMax = Math.max(0, ...bars.map((b) => b.a));
+    if (yMax - yMin < 0.05) yMax = yMin + 0.05;
+    const step = niceStep(yMax - yMin, 3);
+    yMin = Math.floor(yMin / step) * step; yMax = Math.ceil(yMax / step) * step;
+    if (yMax === yMin) yMax = yMin + step;
+    const plotW = W - L - R, plotH = H - T - B;
+    const y = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+    const slot = plotW / bars.length;
+    const bw = Math.max(3, Math.min(22, slot - 2));
+    const x = (i) => L + i * slot + (slot - bw) / 2;
+    const y0 = y(0);
+    const ticks = [];
+    for (let v = yMin; v <= yMax + 1e-9; v += step) ticks.push(Math.round(v * 1000) / 1000);
+    const grid = ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${Math.abs(v) < 1e-9 ? 'var(--muted)' : 'var(--grid)'}" stroke-width="1"/>` +
+      `<text x="${L - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--mono)">${signed(v)}</text>`).join('');
+    const r = Math.min(4, bw / 2);
+    const rects = bars.map((b, i) => {
+      const x0 = x(i), yv = y(b.a);
+      const top = Math.min(y0, yv), bot = Math.max(y0, yv);
+      const h = Math.max(1.5, bot - top);
+      const path = b.a > 0
+        ? `M${x0},${y0} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + bw - r} Q${x0 + bw},${top} ${x0 + bw},${top + r} V${y0} Z`
+        : `M${x0},${y0} V${y0 + h - r} Q${x0},${y0 + h} ${x0 + r},${y0 + h} H${x0 + bw - r} Q${x0 + bw},${y0 + h} ${x0 + bw},${y0 + h - r} V${y0} Z`;
+      return `<path class="bar" data-i="${i}" d="${path}" fill="${b.a > 0 ? 'var(--good)' : 'var(--bad)'}" fill-opacity="0.85"/>`;
+    }).join('');
+    const labelCount = Math.min(bars.length, W < 560 ? 3 : 5);
+    const xl = [];
+    for (let k = 0; k < labelCount; k++) {
+      const i = Math.round((k * (bars.length - 1)) / (labelCount - 1 || 1));
+      const anchor = i === 0 ? 'start' : i === bars.length - 1 ? 'end' : 'middle';
+      const ax = anchor === 'start' ? x(i) : anchor === 'end' ? x(i) + bw : x(i) + bw / 2;
+      xl.push(`<text x="${ax.toFixed(1)}" y="${H - 8}" text-anchor="${anchor}" font-size="11" fill="var(--muted)" font-family="var(--mono)">${dayMonth.format(parseIso(bars[i].date)).replace('.', '')}</text>`);
+    }
+    el.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Пополнения и выводы по операциям">
+        ${grid}${rects}${xl.join('')}
+        <rect id="ops-hl" x="0" y="${T}" width="0" height="${plotH}" fill="var(--ink)" fill-opacity="0.06" visibility="hidden"/>
+        <rect id="ops-hit" x="${L}" y="${T}" width="${plotW}" height="${plotH}" fill="transparent"/>
+      </svg>
+      <div class="tip" id="ops-tip" hidden></div>`;
+    const svg = el.querySelector('svg'), hit = el.querySelector('#ops-hit'), hl = el.querySelector('#ops-hl'), tip = el.querySelector('#ops-tip');
+    const move = (ev) => {
+      const rect = svg.getBoundingClientRect();
+      const px = ((ev.clientX - rect.left) / rect.width) * W;
+      const i = Math.max(0, Math.min(bars.length - 1, Math.floor((px - L) / slot)));
+      const b = bars[i];
+      hl.setAttribute('x', (L + i * slot).toFixed(1)); hl.setAttribute('width', slot.toFixed(1)); hl.setAttribute('visibility', 'visible');
+      tip.hidden = false;
+      tip.innerHTML = `${shortDate.format(parseIso(b.date))} · <span class="mono ${b.a > 0 ? 'pos' : 'neg'}">${signed(b.a)}</span> SOL (${usd(b.a)})${b.note ? ' · ' + escapeHtml(b.note) : ''}`;
+      tip.style.left = Math.max(22, Math.min(78, ((x(i) + bw / 2) / W) * 100)) + '%';
+      tip.style.top = Math.max(0, (Math.min(y(b.a), y0) / H) * rect.height - 44) + 'px';
+    };
+    const leave = () => { hl.setAttribute('visibility', 'hidden'); tip.hidden = true; };
     hit.addEventListener('pointermove', move);
     hit.addEventListener('pointerdown', move);
     hit.addEventListener('pointerleave', leave);
@@ -1418,11 +1529,143 @@
   $('#sess-skip').addEventListener('click', () => nextBlock());
   $('#sess-end').addEventListener('click', endSession);
 
+  // ---------- PnL card ----------
+  const longDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  let pnlIso = null, downloadsNs;
+  async function getDownloads() {
+    if (downloadsNs !== undefined) return downloadsNs;
+    try { downloadsNs = window.claude && typeof window.claude.use === 'function' ? await window.claude.use('downloads') : null; } catch { downloadsNs = null; }
+    // на сайте API Claude нет — сохраняем файл так, как это делает любая веб-страница
+    if (!downloadsNs) {
+      downloadsNs = {
+        save: async (opts) => {
+          const url = URL.createObjectURL(opts.data);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = opts.filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+        },
+      };
+    }
+    return downloadsNs;
+  }
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath();
+  }
+  let cardUnit = lsGet('sol-card-unit', 'usd') === 'sol' ? 'sol' : 'usd';
+  const enDate = new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+  const enNum = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const enSol = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
+  const enUsd = (sol, withSign) => (sol < -0.0005 ? '-' : withSign && sol > 0.0005 ? '+' : '') + '$' + enNum.format(Math.abs(sol) * state.rate);
+  const enSolTxt = (sol, withSign) => (sol < -0.0005 ? '-' : withSign && sol > 0.0005 ? '+' : '') + enSol.format(Math.abs(sol)) + ' SOL';
+  async function drawCard(cv, e) {
+    const W = 1200, H = 800;
+    cv.width = W; cv.height = H;
+    const c = cv.getContext('2d');
+    const SANS = 'Manrope, system-ui, -apple-system, "Segoe UI", sans-serif';
+    const MONO = '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace';
+    try {
+      await Promise.all([`500 62px ${SANS}`, `500 36px ${SANS}`, `600 58px ${SANS}`, `700 110px ${MONO}`, `700 42px ${MONO}`, `700 36px ${MONO}`].map((f) => document.fonts.load(f)));
+    } catch {}
+    const pos = e.result > 0.0005, neg = e.result < -0.0005;
+    const green = '#2ee6a6', red = '#ff4d6d', grey = '#9d9daa', white = '#ffffff';
+    const accent = pos ? green : neg ? red : '#5a5a66';
+    const P = 64;
+    c.fillStyle = '#000000'; c.fillRect(0, 0, W, H);
+    c.textBaseline = 'alphabetic'; c.textAlign = 'left';
+    // date
+    c.fillStyle = white; c.font = `500 62px ${SANS}`;
+    c.fillText(enDate.format(parseIso(e.date)), P, 150);
+    // pnl box
+    const usdMode = cardUnit === 'usd';
+    const bigTxt = usdMode ? enUsd(e.result, true) : enSolTxt(e.result, true);
+    const subTxt = usdMode ? enSolTxt(e.result, true) : enUsd(e.result, true);
+    c.font = `700 110px ${MONO}`; const bwid = c.measureText(bigTxt).width;
+    c.font = `700 42px ${MONO}`; const swid = c.measureText(subTxt).width;
+    const boxW = Math.min(W - 2 * P, Math.max(bwid, swid) + 72), boxH = 214, boxY = 190;
+    c.fillStyle = accent; roundRect(c, P, boxY, boxW, boxH, 10); c.fill();
+    c.fillStyle = pos ? '#000000' : white;
+    c.font = `700 110px ${MONO}`; c.fillText(bigTxt, P + 36, boxY + 124);
+    c.globalAlpha = 0.78; c.font = `700 42px ${MONO}`; c.fillText(subTxt, P + 36, boxY + 184); c.globalAlpha = 1;
+    // before / after
+    const list = entries(); let before = 0;
+    for (const d of list) { if (d.date === e.date) break; before += d.result; }
+    const after = before + e.result;
+    const money = (v) => (usdMode ? enUsd(v, false) : enSolTxt(v, false));
+    const rows = [
+      ['Best trade', e.best || e.bestPct !== null ? `${e.best || '—'}${e.bestPct !== null ? '  ' + (e.bestPct > 0 ? '+' : e.bestPct < 0 ? '-' : '') + enSol.format(Math.abs(e.bestPct)) + '%' : ''}` : '—', e.bestPct !== null && e.bestPct < 0 ? red : green],
+      ['Before', money(before), white],
+      ['After', money(after), after > before + 0.0005 ? green : after < before - 0.0005 ? red : white],
+    ];
+    let y = 486;
+    rows.forEach(([k, v, col]) => {
+      c.fillStyle = white; c.font = `500 36px ${SANS}`; c.fillText(k, P, y);
+      c.fillStyle = v === '—' ? grey : col; c.font = `700 36px ${MONO}`; c.fillText(v, P + 290, y);
+      y += 60;
+    });
+    // footer
+    c.fillStyle = white; c.font = `600 58px ${SANS}`;
+    c.fillText(pos ? 'Green day!' : neg ? 'Red day' : 'Flat day', P, 736);
+  }
+  function setCardUnit(u) {
+    cardUnit = u === 'sol' ? 'sol' : 'usd';
+    lsSet('sol-card-unit', cardUnit);
+    $('#unit-usd').setAttribute('aria-pressed', String(cardUnit === 'usd'));
+    $('#unit-sol').setAttribute('aria-pressed', String(cardUnit === 'sol'));
+    if (pnlIso && dayEntry(pnlIso)) drawCard($('#pnl-canvas'), dayEntry(pnlIso));
+  }
+  async function openPnl(iso) {
+    const e = dayEntry(iso);
+    if (!e) return;
+    pnlIso = iso;
+    $('#pnl-status').textContent = '';
+    $('#pnl-modal').hidden = false;
+    await drawCard($('#pnl-canvas'), e);
+    getDownloads().then((d) => { $('#pnl-download').hidden = !d; });
+  }
+  function closePnl() { $('#pnl-modal').hidden = true; pnlIso = null; }
+  const canvasBlob = (cv) => new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error('blob'))), 'image/png'));
+  async function downloadPnl() {
+    const d = await getDownloads();
+    if (!d || !pnlIso) { $('#pnl-status').textContent = 'Скачивание здесь недоступно — сделай скриншот карточки.'; return; }
+    try {
+      const blob = await canvasBlob($('#pnl-canvas'));
+      await d.save({ filename: `pnl-${pnlIso}.png`, data: blob });
+      $('#pnl-status').textContent = 'Сохранено.';
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'declined') return;
+      $('#pnl-status').textContent = code === 'rate_limited' ? 'Подожди секунду и нажми ещё раз.' : 'Не удалось сохранить — попробуй скопировать или сделать скриншот.';
+    }
+  }
+  async function copyPnl() {
+    try {
+      const blob = await canvasBlob($('#pnl-canvas'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      $('#pnl-status').textContent = 'Скопировано — вставляй куда угодно.';
+    } catch { $('#pnl-status').textContent = 'Скопировать не вышло — скачай PNG.'; }
+  }
+  $('#pnl-download').addEventListener('click', downloadPnl);
+  $('#unit-usd').addEventListener('click', () => setCardUnit('usd'));
+  $('#unit-sol').addEventListener('click', () => setCardUnit('sol'));
+  setCardUnit(cardUnit);
+  $('#pnl-copy').addEventListener('click', copyPnl);
+  $('#pnl-close').addEventListener('click', closePnl);
+  $('#pnl-bg').addEventListener('click', closePnl);
+  $('#pnl-op').addEventListener('click', () => { const iso = pnlIso; closePnl(); selectDay(iso); if (!opKind) openOp('in'); $('#op-date').value = iso; updateOpDayInfo(); $('#op-panel').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$('#pnl-modal').hidden) closePnl(); });
+
   // ---------- events ----------
   $('#days').addEventListener('click', (ev) => {
     const b = ev.target.closest('.day[data-iso]');
     if (!b || b.disabled) return;
     selectDay(b.dataset.iso);
+    if (dayEntry(b.dataset.iso)) { openPnl(b.dataset.iso); return; }
     if (!opKind) openOp('in');
     $('#op-date').value = b.dataset.iso; updateOpDayInfo();
     if (window.innerWidth < 760) $('#op-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1431,9 +1674,7 @@
     const r = ev.target.closest('.jrow[data-iso]');
     if (!r) return;
     selectDay(r.dataset.iso);
-    if (!opKind) openOp('in');
-    $('#op-date').value = r.dataset.iso; updateOpDayInfo();
-    $('#op-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    openPnl(r.dataset.iso);
   });
   $('#prev').addEventListener('click', () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() - 1, 1); renderCalendar(entries()); });
   $('#next').addEventListener('click', () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + 1, 1); renderCalendar(entries()); });
