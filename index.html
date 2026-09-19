@@ -347,6 +347,7 @@
     width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--bg); font-family: var(--mono);
   }
+  .paste-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   #sync-panel .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   #sync-panel a { color: var(--accent); }
 
@@ -558,7 +559,10 @@
     <div id="sync-panel" hidden>
       <div class="row">
         <label for="sync-token">Адрес хранилища или токен GitHub</label>
-        <input id="sync-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="406a77… или ghp_…">
+        <div class="paste-row">
+          <input id="sync-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="406a77… или ghp_…">
+          <button type="button" class="btn" id="sync-paste">Вставить</button>
+        </div>
       </div>
       <div class="actions">
         <button type="button" class="btn primary" id="sync-save">Подключить</button>
@@ -860,6 +864,19 @@
     };
     const v = views[status] || views.local;
     el.innerHTML = '<span class="sync-dot ' + v[0] + '"></span><span>' + escapeHtml(v[1]) + '</span>';
+
+    // В режиме чтения предупреждаем наверху страницы: иначе легко записать день
+    // на телефоне и быть уверенным, что он уехал в облако
+    const n = $('#notice');
+    if (n) {
+      if (status === 'readonly') {
+        n.textContent = 'Это устройство пока только читает облако. День, записанный здесь, останется на нём и не попадёт на другие устройства — чтобы записи улетали, вставь токен в блоке «Синхронизация» внизу.';
+        n.hidden = false;
+      } else {
+        n.hidden = true;
+      }
+    }
+
     const now = $('#sync-now'), forget = $('#sync-forget');
     const linked = !!(sync.token || sync.gistId);
     if (now) now.hidden = !linked;
@@ -1719,6 +1736,21 @@
     $('#sync-toggle').textContent = p.hidden ? 'Настроить' : 'Свернуть';
   });
   $('#sync-now').addEventListener('click', () => syncNow());
+  // На телефоне вставить длинный токен в поле пароля неудобно — берём из буфера сами
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    $('#sync-paste').addEventListener('click', async () => {
+      try {
+        const v = ((await navigator.clipboard.readText()) || '').trim();
+        if (!v) { toast('В буфере пусто'); return; }
+        $('#sync-token').value = v;
+        toast('Вставил — жми «Подключить»');
+      } catch {
+        toast('Браузер не дал доступ к буферу — вставь вручную');
+      }
+    });
+  } else {
+    $('#sync-paste').hidden = true;
+  }
   $('#sync-save').addEventListener('click', async () => {
     const t = $('#sync-token').value.trim();
     if (!t) { toast('Вставь токен или адрес хранилища'); return; }
