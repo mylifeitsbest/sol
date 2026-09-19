@@ -5,7 +5,7 @@
   "lang": "ru",
   "start_url": "./",
   "scope": "./",
-  "id": "/sol/",
+  "id": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f6f5fb",
