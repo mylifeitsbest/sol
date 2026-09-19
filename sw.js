@@ -2,7 +2,7 @@
    Стратегия: страница берётся из сети (чтобы обновления доезжали), статика — из кэша.
    Запросы к api.github.com воркер не трогает вообще. */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = 'sol-' + VERSION;
 
 const SHELL = [

@@ -557,8 +557,8 @@
     </div>
     <div id="sync-panel" hidden>
       <div class="row">
-        <label for="sync-token">Токен GitHub — classic, одна галочка <b>gist</b></label>
-        <input id="sync-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ghp_…">
+        <label for="sync-token">Адрес хранилища или токен GitHub</label>
+        <input id="sync-token" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="406a77… или ghp_…">
       </div>
       <div class="actions">
         <button type="button" class="btn primary" id="sync-save">Подключить</button>
@@ -568,8 +568,10 @@
       </div>
       <p class="hint">
         Записи лежат в приватном gist на твоём GitHub, так что телефон и компьютер видят одно и то же.
-        Токен хранится только в этом браузере и уходит только на api.github.com.
-        Создать: <a href="https://github.com/settings/tokens/new?scopes=gist&description=Sol%20tracker" target="_blank" rel="noopener">github.com/settings/tokens</a>
+        Одного адреса хранилища хватает, чтобы видеть всю статистику. Токен нужен только для того,
+        чтобы новые записи с этого устройства уходили в облако — без него устройство читает, но не пишет.
+        И адрес, и токен хранятся только в этом браузере и уходят только на api.github.com.
+        Токен создаётся тут: <a href="https://github.com/settings/tokens/new?scopes=gist&description=Sol%20tracker" target="_blank" rel="noopener">github.com/settings/tokens</a>
         → Generate new token (classic) → отметить только <b>gist</b>.
       </p>
       <input id="sync-file" type="file" accept="application/json,.json" hidden>
@@ -762,8 +764,10 @@
         {
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2022-11-28',
-          Authorization: 'Bearer ' + sync.token,
         },
+        // без токена секретный gist всё равно читается по идентификатору,
+        // поэтому статистика видна сразу, а токен нужен только чтобы писать
+        sync.token ? { Authorization: 'Bearer ' + sync.token } : {},
         o.body ? { 'Content-Type': 'application/json' } : {}
       ),
     });
@@ -778,6 +782,7 @@
 
   async function ensureGist() {
     if (sync.gistId) return sync.gistId;
+    if (!sync.token) throw new Error('нечего читать: ни адреса хранилища, ни токена');
     const list = await gh('/gists?per_page=100');
     const found = Array.isArray(list) ? list.find((g) => g && g.files && g.files[GIST_FILE]) : null;
     if (found) {
@@ -812,23 +817,23 @@
   }
 
   async function syncNow() {
-    if (!sync.token || sync.busy) return;
+    if ((!sync.token && !sync.gistId) || sync.busy) return;
     sync.busy = true;
     setSyncStatus('syncing');
     try {
-      if (!sync.login) { try { sync.login = (await gh('/user')).login; } catch {} }
+      if (sync.token && !sync.login) { try { sync.login = (await gh('/user')).login; } catch {} }
       const remote = await pullDoc();
       const merged = mergeDocs(doc, remote);
-      const needPush = sync.dirty || !same(merged, remote);
+      // писать можно только с токеном; без него режим чтения
+      const needPush = !!sync.token && (sync.dirty || !same(merged, remote));
       doc = merged;
       pruneTombstones();
       lsSet(LS_DOC, doc);
       applyDoc();
       render();
-      if (needPush) await pushDoc();
-      sync.dirty = false;
+      if (needPush) { await pushDoc(); sync.dirty = false; }
       sync.lastOk = Date.now();
-      setSyncStatus('ok', '');
+      setSyncStatus(sync.token ? 'ok' : 'readonly', '');
     } catch (e) {
       sync.dirty = true;
       if (!navigator.onLine) setSyncStatus('offline', '');
@@ -846,17 +851,19 @@
     if (!el) return;
     const at = sync.lastOk ? clock.format(new Date(sync.lastOk)) : '';
     const views = {
-      local: ['', 'Записи только на этом устройстве. Подключи токен — и телефон с компьютером будут видеть одно и то же.'],
+      local: ['', 'Записи только на этом устройстве. Подключи хранилище — и телефон с компьютером будут видеть одно и то же.'],
       syncing: ['warn', 'Синхронизирую…'],
       ok: ['ok', 'Синхронизировано' + (sync.login ? ' · ' + sync.login : '') + (at ? ' · ' + at : '')],
+      readonly: ['ok', 'Статистика из облака' + (at ? ' · ' + at : '') + ' · только чтение: чтобы новые записи уходили в облако, вставь токен'],
       offline: ['warn', 'Нет сети. Записи сохранены на устройстве и уйдут в облако, как только связь вернётся.'],
       error: ['err', 'Синхронизация не прошла. ' + (sync.detail || 'Попробуй «Обновить».')],
     };
     const v = views[status] || views.local;
     el.innerHTML = '<span class="sync-dot ' + v[0] + '"></span><span>' + escapeHtml(v[1]) + '</span>';
     const now = $('#sync-now'), forget = $('#sync-forget');
-    if (now) now.hidden = !sync.token;
-    if (forget) forget.hidden = !sync.token;
+    const linked = !!(sync.token || sync.gistId);
+    if (now) now.hidden = !linked;
+    if (forget) forget.hidden = !linked;
   }
 
   // ---------- бэкап файлом ----------
@@ -905,7 +912,25 @@
     }
   }
 
+  // Настройка из ссылки: #sync=<id хранилища>&token=<токен>.
+  // Так устройство подключается одним тапом, а идентификатор не лежит в репозитории.
+  function readSetupFromLink() {
+    const h = (location.hash || '').slice(1);
+    if (!h) return false;
+    let p;
+    try { p = new URLSearchParams(h); } catch { return false; }
+    const gistId = (p.get('sync') || p.get('gist') || '').trim();
+    const token = (p.get('token') || '').trim();
+    let ok = false;
+    if (/^[0-9a-f]{20,40}$/i.test(gistId)) { lsSet(LS_GIST, gistId); ok = true; }
+    if (/^(ghp_|github_pat_|gho_)/.test(token)) { lsSet(LS_TOKEN, token); ok = true; }
+    // убираем настройку из адресной строки, чтобы она не осела в истории и закладках
+    if (ok) { try { history.replaceState(null, '', location.pathname + location.search); } catch {} }
+    return ok;
+  }
+
   async function boot() {
+    const fromLink = readSetupFromLink();
     state.account = lsGet('sol-account', 'demo') === 'real' ? 'real' : 'demo';
     state.mode = 'local';
     doc = sanitizeDoc(lsGet(LS_DOC, null));
@@ -924,8 +949,10 @@
 
     sync.token = lsGet(LS_TOKEN, '') || '';
     sync.gistId = lsGet(LS_GIST, '') || '';
-    setSyncStatus(sync.token ? 'syncing' : 'local');
-    if (sync.token) { state.mode = 'sync'; syncNow(); }
+    const linked = !!(sync.token || sync.gistId);
+    setSyncStatus(linked ? 'syncing' : 'local');
+    if (linked) { state.mode = 'sync'; syncNow(); }
+    if (fromLink) toast('Хранилище подключено — тяну статистику');
   }
 
   function showNotice(text) { const n = $('#notice'); n.textContent = text; n.hidden = false; }
@@ -1694,7 +1721,17 @@
   $('#sync-now').addEventListener('click', () => syncNow());
   $('#sync-save').addEventListener('click', async () => {
     const t = $('#sync-token').value.trim();
-    if (!t) { toast('Вставь токен'); return; }
+    if (!t) { toast('Вставь токен или адрес хранилища'); return; }
+    // строка из hex — это адрес хранилища: подключаемся на чтение, токен не нужен
+    if (/^[0-9a-f]{20,40}$/i.test(t)) {
+      sync.gistId = t;
+      lsSet(LS_GIST, t);
+      $('#sync-token').value = '';
+      state.mode = 'sync';
+      await syncNow();
+      toast('Хранилище подключено');
+      return;
+    }
     const prev = sync.token;
     sync.token = t;
     setSyncStatus('syncing');
@@ -1709,13 +1746,13 @@
       toast('Подключено: ' + me.login);
     } catch (e) {
       sync.token = prev;
-      setSyncStatus(prev ? 'ok' : 'local', '');
+      setSyncStatus(prev ? 'ok' : sync.gistId ? 'readonly' : 'local', '');
       toast(e && e.status === 401 ? 'Токен не подошёл' : 'Не получилось подключиться');
     }
   });
   $('#sync-forget').addEventListener('click', () => {
-    sync.token = ''; sync.login = ''; sync.lastOk = 0; state.mode = 'local';
-    try { localStorage.removeItem(LS_TOKEN); } catch {}
+    sync.token = ''; sync.login = ''; sync.gistId = ''; sync.lastOk = 0; state.mode = 'local';
+    try { localStorage.removeItem(LS_TOKEN); localStorage.removeItem(LS_GIST); } catch {}
     setSyncStatus('local', '');
     toast('Синхронизация отключена. Записи остались на устройстве.');
   });
@@ -1727,13 +1764,14 @@
     ev.target.value = '';
   });
 
+  const linkedToCloud = () => !!(sync.token || sync.gistId);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     updateWakeLock();
-    if (sync.token && Date.now() - sync.lastOk > 5000) syncNow();
+    if (linkedToCloud() && Date.now() - sync.lastOk > 5000) syncNow();
   });
-  window.addEventListener('online', () => { if (sync.token) syncNow(); });
-  setInterval(() => { if (!document.hidden && sync.token && !sync.busy) syncNow(); }, POLL_MS);
+  window.addEventListener('online', () => { if (linkedToCloud()) syncNow(); });
+  setInterval(() => { if (!document.hidden && linkedToCloud() && !sync.busy) syncNow(); }, POLL_MS);
 
   // ---------- «на экран Домой» ----------
   function maybeOfferInstall() {
