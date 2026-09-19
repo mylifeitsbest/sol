@@ -2,7 +2,7 @@
    Стратегия: страница берётся из сети (чтобы обновления доезжали), статика — из кэша.
    Запросы к api.github.com воркер не трогает вообще. */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'sol-' + VERSION;
 
 const SHELL = [
@@ -58,11 +58,14 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(req)
         .then((res) => {
+          // 404 или 5xx — это ответ, а не ошибка сети: в кэш такое класть нельзя,
+          // иначе страница-ошибка затрёт рабочую копию приложения
+          if (!res || !res.ok) throw new Error('bad status ' + (res && res.status));
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put('./index.html', copy));
           return res;
         })
-        .catch(() => caches.match('./index.html').then((r) => r || caches.match('./')))
+        .catch(async () => (await caches.match('./index.html')) || (await caches.match('./')) || fetch(req))
     );
     return;
   }
